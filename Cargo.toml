@@ -1,0 +1,32 @@
+[package]
+name = "circos-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Circos - circular data visualization, ported from Perl to Rust"
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md",
+    "circos/etc/**/*",
+    "circos/data/**/*",
+    "circos/fonts/**/*",
+]
+
+[features]
+default = ["cli"]
+cli = ["clap"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"], optional = true }
+rayon = "1"
+resvg = "0.44"
+tiny-skia = "0.11"
+usvg = "0.44"
+
+[[bin]]
+name = "circos-rs"
+required-features = ["cli"]
+
+[dev-dependencies]
+approx = "0.5"
+tempfile = "3"
