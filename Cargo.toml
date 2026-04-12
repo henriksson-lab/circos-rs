@@ -3,13 +3,15 @@ name = "circos-rs"
 version = "0.1.0"
 edition = "2024"
 description = "Circos - circular data visualization, ported from Perl to Rust"
+license = "MIT"
+repository = "https://github.com/henriksson-lab/circos-rs"
+keywords = ["circos", "genomics", "visualization", "bioinformatics", "svg"]
+categories = ["science", "visualization", "command-line-utilities"]
 include = [
     "src/**/*",
     "Cargo.toml",
     "README.md",
-    "circos/etc/**/*",
-    "circos/data/**/*",
-    "circos/fonts/**/*",
+    "LICENSE",
 ]
 
 [features]
