@@ -51,7 +51,7 @@ pub fn arc_points(
     loop {
         let rad = angle * deg2rad;
         points.push((cx + radius * rad.cos(), cy + radius * rad.sin()));
-        if (step > 0.0 && angle >= angle_end) || (step < 0.0 && angle <= angle_end) {
+        if step == 0.0 || (step > 0.0 && angle >= angle_end) || (step < 0.0 && angle <= angle_end) {
             break;
         }
         angle += step;
