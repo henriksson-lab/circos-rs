@@ -2,7 +2,7 @@
 
 A pure Rust implementation of [Circos](http://circos.ca/), the circular data visualization tool originally written in Perl. Produces publication-quality circular plots of genomic data and annotations.
 
-* 2026-05-16: New audit round. More testing needed but possibly complete
+* 2026-05-16: New audit round. More testing needed but possibly complete. Be vigilant for translation bugs
 
 ## This is an LLM-mediated faithful (hopefully) translation, not the original code! 
 
