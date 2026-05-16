@@ -1,62 +1,202 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use clap::Parser;
 
-use circos_rs::config::parser::ConfigParser;
-use circos_rs::draw;
-use circos_rs::karyotype;
-use circos_rs::layout::Layout;
-use circos_rs::render::color::ColorMap;
+use circos_rs::config::types::ConfigValue;
 use circos_rs::render::png;
 
 #[derive(Parser, Debug)]
-#[command(name = "circos", about = "Circular data visualization")]
+#[command(
+    name = "circos",
+    about = "Circular data visualization",
+    rename_all = "snake_case",
+    rename_all_env = "snake_case"
+)]
 struct Cli {
-    /// Configuration file
-    #[arg(short, long = "conf")]
-    conf: String,
+    /// Configuration file (required)
+    #[arg(short = 'c', long = "configfile", alias = "conf", value_name = "FILE")]
+    configfile: String,
 
-    /// Generate SVG output
-    #[arg(long, default_value_t = true)]
-    svg: bool,
-
-    /// Generate PNG output
-    #[arg(long, default_value_t = false)]
-    png: bool,
-
-    /// Output directory
-    #[arg(long, default_value = ".")]
-    outputdir: String,
-
-    /// Output filename (without extension)
-    #[arg(long, default_value = "circos")]
-    outputfile: String,
-
-    /// Chromosomes to display
-    #[arg(long)]
+    // --- Ideograms ---
+    /// Chromosomes to display (semicolon-separated, prefix `-` to exclude, `hs1:10-20` for ranges)
+    #[arg(long, value_name = "STRING")]
     chromosomes: Option<String>,
 
     /// Chromosome display order
-    #[arg(long)]
+    #[arg(long, value_name = "STRING")]
     chromosomes_order: Option<String>,
 
-    /// Chromosome scale
-    #[arg(long)]
+    /// Chromosome scaling factors (e.g. `hs1=2,hs2=0.5`)
+    #[arg(long, value_name = "STRING")]
     chromosomes_scale: Option<String>,
 
-    /// Chromosome radius
-    #[arg(long)]
+    /// Chromosome radius overrides
+    #[arg(long, value_name = "STRING")]
     chromosomes_radius: Option<String>,
 
+    // --- Output format ---
+    /// Toggle PNG output
+    #[arg(long, default_value_t = false)]
+    png: bool,
+
+    /// Request 24-bit PNG (required when using transparency)
+    #[arg(long = "24bit", default_value_t = false)]
+    bit24: bool,
+
+    /// Toggle SVG output
+    #[arg(long, default_value_t = true)]
+    svg: bool,
+
+    // --- Output paths ---
+    /// Output directory
+    #[arg(long, value_name = "DIR", default_value = ".")]
+    outputdir: String,
+
+    /// Output filename (without extension)
+    #[arg(long, value_name = "FILE", default_value = "circos")]
+    outputfile: String,
+
+    // --- Input format ---
+    /// Input data file delimiter (default: whitespace; use tab for multi-word labels)
+    #[arg(long, value_name = "DELIM")]
+    file_delim: Option<String>,
+
+    // --- Custom template fields ---
+    /// Custom field, referenced in config as __$CONF{usertext1}__
+    #[arg(long, value_name = "STRING")]
+    usertext1: Option<String>,
+    #[arg(long, value_name = "STRING")]
+    usertext2: Option<String>,
+    #[arg(long, value_name = "STRING")]
+    usertext3: Option<String>,
+    #[arg(long, value_name = "STRING")]
+    usertext4: Option<String>,
+
+    // --- Ticks ---
+    /// Show ticks (use --no-show_ticks to suppress)
+    #[arg(long, overrides_with = "_no_show_ticks")]
+    show_ticks: bool,
+    #[arg(long = "no-show_ticks", hide = true)]
+    _no_show_ticks: bool,
+
+    /// Show tick labels (use --no-show_tick_labels to suppress)
+    #[arg(long, overrides_with = "_no_show_tick_labels")]
+    show_tick_labels: bool,
+    #[arg(long = "no-show_tick_labels", hide = true)]
+    _no_show_tick_labels: bool,
+
+    // --- Image maps ---
+    /// Enable image map (legacy alias)
+    #[arg(long, default_value_t = false)]
+    imagemap: bool,
+
+    /// Enable image map generation
+    #[arg(long, default_value_t = false)]
+    image_map_use: bool,
+
+    /// Image map name attribute
+    #[arg(long, value_name = "MAPNAME")]
+    image_map_name: Option<String>,
+
+    /// Image map output file
+    #[arg(long, value_name = "FILE")]
+    image_map_file: Option<String>,
+
+    /// Behavior when an image-map parameter is missing ({exit | removeparam | removeurl})
+    #[arg(long, value_name = "POLICY")]
+    image_map_missing_parameter: Option<String>,
+
+    /// Tag rendered elements with name attribute
+    #[arg(long, default_value_t = false)]
+    tagname: bool,
+
+    // --- Debugging ---
     /// Silent mode
     #[arg(long, default_value_t = false)]
     silent: bool,
 
-    /// Debug mode
+    /// Verbose reporting (repeat for higher verbosity)
+    #[arg(short = 'V', long, action = clap::ArgAction::Count)]
+    verbose: u8,
+
+    /// Debug output (repeat for higher verbosity)
+    #[arg(short = 'd', long, action = clap::ArgAction::Count)]
+    debug: u8,
+
+    /// Print long-form manual
     #[arg(long, default_value_t = false)]
-    debug: bool,
+    man: bool,
 }
 
+/// Build the Perl `%OPT` map from parsed CLI args. Each entry overrides the
+/// corresponding `%CONF` key via `populateconfiguration` inside `run_with_opt`.
+fn opt_from_cli(cli: &Cli) -> HashMap<String, ConfigValue> {
+    let mut opt: HashMap<String, ConfigValue> = HashMap::new();
+
+    macro_rules! set_opt_str {
+        ($key:expr, $val:expr) => {
+            if let Some(v) = &$val {
+                opt.insert($key.to_string(), ConfigValue::Str(v.clone()));
+            }
+        };
+    }
+    macro_rules! set_opt_flag {
+        ($key:expr, $val:expr) => {
+            if $val {
+                opt.insert($key.to_string(), ConfigValue::Str("1".to_string()));
+            }
+        };
+    }
+
+    set_opt_str!("chromosomes", cli.chromosomes);
+    set_opt_str!("chromosomes_order", cli.chromosomes_order);
+    set_opt_str!("chromosomes_scale", cli.chromosomes_scale);
+    set_opt_str!("chromosomes_radius", cli.chromosomes_radius);
+    set_opt_str!("file_delim", cli.file_delim);
+    set_opt_str!("usertext1", cli.usertext1);
+    set_opt_str!("usertext2", cli.usertext2);
+    set_opt_str!("usertext3", cli.usertext3);
+    set_opt_str!("usertext4", cli.usertext4);
+    set_opt_str!("image_map_name", cli.image_map_name);
+    set_opt_str!("image_map_file", cli.image_map_file);
+    set_opt_str!("image_map_missing_parameter", cli.image_map_missing_parameter);
+
+    set_opt_flag!("png", cli.png);
+    set_opt_flag!("24bit", cli.bit24);
+    set_opt_flag!("imagemap", cli.imagemap);
+    set_opt_flag!("image_map_use", cli.image_map_use);
+    set_opt_flag!("tagname", cli.tagname);
+    set_opt_flag!("silent", cli.silent);
+    set_opt_flag!("show_ticks", cli.show_ticks);
+    set_opt_flag!("show_tick_labels", cli.show_tick_labels);
+
+    opt.insert(
+        "outputdir".to_string(),
+        ConfigValue::Str(cli.outputdir.clone()),
+    );
+    opt.insert(
+        "outputfile".to_string(),
+        ConfigValue::Str(cli.outputfile.clone()),
+    );
+    if cli.verbose > 0 {
+        opt.insert(
+            "verbose".to_string(),
+            ConfigValue::Str(cli.verbose.to_string()),
+        );
+    }
+    if cli.debug > 0 {
+        opt.insert(
+            "debug".to_string(),
+            ConfigValue::Str(cli.debug.to_string()),
+        );
+    }
+
+    opt
+}
+
+/// CLI entry point: parses arguments, runs the Circos pipeline, and writes
+/// the resulting SVG (and optionally PNG) to disk.
 fn main() {
     let cli = Cli::parse();
 
@@ -64,139 +204,27 @@ fn main() {
         eprintln!("circos-rs v0.1.0");
     }
 
-    // Determine base directory from config file path
-    let conf_path = Path::new(&cli.conf);
-    let base_dir = conf_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .to_path_buf();
+    let conf_path = Path::new(&cli.configfile);
+    let opt = opt_from_cli(&cli);
 
-    // Set up config parser with search paths
-    // Circos tutorials reference files relative to the circos root (e.g., "etc/colors.conf")
-    // We need to search up from the config file directory to find the circos root
-    let mut search_paths = vec![
-        base_dir.clone(),
-        base_dir.join("etc"),
-    ];
-    // Walk up directories looking for an "etc" directory with colors.conf
-    let mut parent = base_dir.as_path();
-    for _ in 0..5 {
-        if let Some(p) = parent.parent() {
-            search_paths.push(p.to_path_buf());
-            if p.join("etc").join("colors.conf").exists() {
-                search_paths.push(p.to_path_buf());
-                break;
-            }
-            parent = p;
-        } else {
-            break;
-        }
-    }
-
-    let parser = ConfigParser {
-        config_paths: search_paths,
-        auto_true: true,
-        lower_case_names: true,
-    };
-
-    // Parse configuration
-    if !cli.silent {
-        eprintln!("reading config from {}", cli.conf);
-    }
-    let config = match parser.parse_file(conf_path) {
-        Ok(c) => c,
+    let out = match circos_rs::run_with_opt(conf_path, opt) {
+        Ok(o) => o,
         Err(e) => {
-            eprintln!("error parsing config: {}", e);
+            eprintln!("error: {}", e);
             std::process::exit(1);
         }
     };
 
-    // Read karyotype file
-    let karyotype_rel = match config.get("karyotype").and_then(|v| v.as_str()) {
-        Some(s) => s.to_string(),
-        None => {
-            eprintln!("error: no karyotype file specified in config");
-            std::process::exit(1);
-        }
-    };
-
-    // Try to find karyotype file relative to config dir, then base dir
-    let karyotype_path = if Path::new(&karyotype_rel).exists() {
-        Path::new(&karyotype_rel).to_path_buf()
-    } else if base_dir.join(&karyotype_rel).exists() {
-        base_dir.join(&karyotype_rel)
-    } else {
-        // Try relative to a parent "circos" directory
-        let mut found = None;
-        for search in &parser.config_paths {
-            let candidate = search.join(&karyotype_rel);
-            if candidate.exists() {
-                found = Some(candidate);
-                break;
-            }
-            let candidate = search.join("..").join(&karyotype_rel);
-            if candidate.exists() {
-                found = Some(candidate);
-                break;
-            }
-        }
-        match found {
-            Some(p) => p,
-            None => {
-                eprintln!("error: cannot find karyotype file '{}'", karyotype_rel);
-                std::process::exit(1);
-            }
-        }
-    };
-
-    if !cli.silent {
-        eprintln!("reading karyotype from {}", karyotype_path.display());
-    }
-    let karyotype_data = match karyotype::read_karyotype(&karyotype_path, None) {
-        Ok(k) => k,
-        Err(e) => {
-            eprintln!("error reading karyotype: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // Build layout
-    if !cli.silent {
-        eprintln!("building layout ({} chromosomes)", karyotype_data.chromosomes.len());
-    }
-    let layout = match Layout::build(&config, &karyotype_data) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("error building layout: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    if !cli.silent {
-        eprintln!(
-            "layout: {} ideograms, gcircum={:.0}, radius={:.0}",
-            layout.ideograms.len(),
-            layout.gcircum,
-            layout.image_radius
-        );
-    }
-
-    // Build color map
-    let mut colors = ColorMap::new();
-    if let Some(color_conf) = config.get("colors").and_then(|v| v.as_map()) {
-        colors.load_from_config(color_conf);
-    }
-
-    // Generate output
-    let circos_base = find_circos_base(&conf_path);
-    let svg = draw::draw_circos(&layout, &config, &karyotype_data, &colors, &circos_base);
-
-    if cli.svg {
-        let output_path = Path::new(&cli.outputdir).join(format!("{}.svg", cli.outputfile));
-        match std::fs::write(&output_path, &svg) {
+    if cli.svg && out.svg_make {
+        let output_path = Path::new(&out.outputfile_svg);
+        match std::fs::write(output_path, &out.svg) {
             Ok(()) => {
                 if !cli.silent {
-                    eprintln!("wrote SVG to {} ({} bytes)", output_path.display(), svg.len());
+                    eprintln!(
+                        "wrote SVG to {} ({} bytes)",
+                        output_path.display(),
+                        out.svg.len()
+                    );
                 }
             }
             Err(e) => {
@@ -206,9 +234,9 @@ fn main() {
         }
     }
 
-    if cli.png {
-        let output_path = Path::new(&cli.outputdir).join(format!("{}.png", cli.outputfile));
-        match png::svg_to_png(&svg, &output_path) {
+    if cli.png || out.png_make {
+        let output_path = Path::new(&out.outputfile_png);
+        match png::svg_to_png(&out.svg, output_path) {
             Ok(()) => {
                 if !cli.silent {
                     eprintln!("wrote PNG to {}", output_path.display());
@@ -220,20 +248,4 @@ fn main() {
             }
         }
     }
-}
-
-/// Find the circos base directory by walking up from the config file
-/// looking for a directory that contains etc/colors.conf.
-fn find_circos_base(conf_path: &Path) -> std::path::PathBuf {
-    let mut dir = conf_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    for _ in 0..6 {
-        if dir.join("etc").join("colors.conf").exists() {
-            return dir;
-        }
-        dir = match dir.parent() {
-            Some(p) => p.to_path_buf(),
-            None => break,
-        };
-    }
-    conf_path.parent().unwrap_or(Path::new(".")).to_path_buf()
 }

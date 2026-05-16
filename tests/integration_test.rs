@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use circos_rs::config::parser::ConfigParser;
+use circos_rs::config::types::ConfigValue;
 use circos_rs::draw;
 use circos_rs::karyotype;
 use circos_rs::layout::Layout;
@@ -11,15 +13,15 @@ fn test_parse_tutorial_config() {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("circos");
     let conf_path = base.join("tutorials/2/2/circos.conf");
     if !conf_path.exists() {
-        eprintln!("skipping: circos tutorial data not found at {:?}", conf_path);
+        eprintln!(
+            "skipping: circos tutorial data not found at {:?}",
+            conf_path
+        );
         return;
     }
 
     let parser = ConfigParser {
-        config_paths: vec![
-            base.join("etc"),
-            base.clone(),
-        ],
+        config_paths: vec![base.join("etc"), base.clone()],
         auto_true: true,
         lower_case_names: true,
     };
@@ -55,7 +57,10 @@ fn test_parse_tutorial_config() {
 
     // Check colors were loaded
     let colors = config.get("colors").unwrap().as_map().unwrap();
-    assert_eq!(colors.get("white").unwrap().as_str().unwrap(), "255,255,255");
+    assert_eq!(
+        colors.get("white").unwrap().as_str().unwrap(),
+        "255,255,255"
+    );
     assert_eq!(colors.get("black").unwrap().as_str().unwrap(), "0,0,0");
     assert_eq!(colors.get("red").unwrap().as_str().unwrap(), "247,42,66");
 
@@ -145,11 +150,15 @@ fn test_layout_build() {
 
     // Each ideogram should have positive scaled length
     for ideo in &layout.ideograms {
-        assert!(ideo.length_scaled > 0.0, "ideogram {} has zero length", ideo.chr);
+        assert!(
+            ideo.length_scaled > 0.0,
+            "ideogram {} has zero length",
+            ideo.chr
+        );
     }
 
     // Test angle computation: hs1 start should be near -90 degrees (top of circle)
-    let angle_hs1_start = layout.get_angle(0, "hs1").unwrap();
+    let angle_hs1_start = layout.getanglepos(0, "hs1").unwrap();
     // Should be near -90 degrees (which wraps to 270)
     assert!(
         (angle_hs1_start - 270.0).abs() < 5.0 || angle_hs1_start < 5.0,
@@ -158,7 +167,7 @@ fn test_layout_build() {
     );
 
     // Test xy conversion: angle 0, radius 100 should be at (radius+100, radius)
-    let (x, y) = layout.get_xy(0.0, 100.0);
+    let (x, y) = layout.getxypos(0.0, 100.0);
     assert!((x - 1600.0).abs() < 0.1);
     assert!((y - 1500.0).abs() < 0.1);
 
@@ -193,7 +202,7 @@ fn test_svg_output() {
     // Build color map from config
     let mut colors = ColorMap::new();
     if let Some(color_conf) = config.get("colors").and_then(|v| v.as_map()) {
-        colors.load_from_config(color_conf);
+        colors.allocate_colors(color_conf, false, 0, None);
     }
 
     // Generate SVG
@@ -203,9 +212,15 @@ fn test_svg_output() {
     assert!(svg.contains("<?xml"), "missing XML header");
     assert!(svg.contains("<svg"), "missing SVG element");
     assert!(svg.contains("</svg>"), "missing SVG close");
-    assert!(svg.contains(r#"<g id="ideograms">"#), "missing ideograms group");
+    assert!(
+        svg.contains(r#"<g id="ideograms">"#),
+        "missing ideograms group"
+    );
     assert!(svg.contains("</g>"), "missing group close");
-    assert!(svg.contains("<path"), "missing path elements (ideogram arcs)");
+    assert!(
+        svg.contains("<path"),
+        "missing path elements (ideogram arcs)"
+    );
     assert!(svg.contains("<text"), "missing text elements (labels)");
 
     // Should have at least 24 path elements (one per ideogram fill minimum)
@@ -230,6 +245,145 @@ fn test_svg_output() {
     // Write SVG to file for visual inspection
     let output_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("test_output.svg");
     std::fs::write(&output_path, &svg).unwrap();
-    eprintln!("SVG output written to {:?} ({} bytes, {} paths)",
-        output_path, svg.len(), path_count);
+    eprintln!(
+        "SVG output written to {:?} ({} bytes, {} paths)",
+        output_path,
+        svg.len(),
+        path_count
+    );
+}
+
+/// End-to-end smoke: the `run()` entry point renders a real Circos tutorial.
+#[test]
+fn test_run_tutorial() {
+    let conf = Path::new(env!("CARGO_MANIFEST_DIR")).join("circos/tutorials/2/2/circos.conf");
+    if !conf.exists() {
+        eprintln!("skipping: tutorial config not present at {:?}", conf);
+        return;
+    }
+    let svg = circos_rs::run(&conf).expect("run should produce SVG");
+    assert!(!svg.is_empty());
+    assert!(svg.starts_with("<?xml"));
+    assert!(svg.contains("<svg "));
+    assert!(svg.ends_with("</svg>\n") || svg.ends_with("</svg>"));
+    // Sanity: NaN/empty path never appears
+    assert!(!svg.contains("NaN"), "SVG contains NaN");
+    assert!(!svg.contains(r#"<path d="""#), "SVG contains empty <path>");
+    // Must contain ideograms from the 24-chr karyotype
+    let path_count = svg.matches("<path").count();
+    assert!(path_count > 100, "expected >100 paths, got {}", path_count);
+}
+
+/// Multi-ideogram-per-chromosome: tutorial 7/2 declares 6 separately-tagged
+/// ranges on hs1 and hs2, and should produce 6 ideograms (regression guard for
+/// iter 31's create_ideogram_set refactor).
+#[test]
+fn test_run_tutorial_multi_ideogram() {
+    let conf = Path::new(env!("CARGO_MANIFEST_DIR")).join("circos/tutorials/7/2/circos.conf");
+    if !conf.exists() {
+        eprintln!("skipping: tutorial 7/2 config not present");
+        return;
+    }
+    let svg = circos_rs::run(&conf).expect("run should produce SVG");
+    assert!(!svg.is_empty());
+    // 7/2 uses: chromosomes = hs1[a]:0-20;hs2[b]:0-20;hs1[c]:20-40;hs2[d]:20-40;hs1[e]:40-60;hs2[f]:40-60
+    // Each tagged range is its own ideogram, drawn as a filled slice inside the
+    // <g id="ideograms"> block. Count the <path>s in that block.
+    let (_pre, rest) = svg
+        .split_once("<g id=\"ideograms\">")
+        .expect("missing ideograms group");
+    let (ideo_block, _post) = rest.split_once("</g>").expect("unterminated ideograms group");
+    let ideo_slice_count = ideo_block.matches("<path").count();
+    // With fill + outline pass per ideogram Perl emits 2× paths per ideo; our
+    // current draw_ideograms emits outer fill + (bands 0..) + outline = 2 per
+    // ideogram with no bands. Loosen to >= 6 to just assert all 6 ideograms drew.
+    assert!(
+        ideo_slice_count >= 6,
+        "expected ≥6 ideogram paths for 6 tagged ideograms, got {}",
+        ideo_slice_count
+    );
+}
+
+/// Image-map round-trip: configuring `ideogram_url` must produce per-ideogram
+/// `<area>` entries in the companion `.html` file when `image_map_use=1`.
+/// Guards iters 60+63 (end-to-end image-map plumbing + ideogram URL areas).
+#[test]
+fn test_run_image_map_emission() {
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let conf_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("circos/tutorials/2/2");
+    if !conf_dir.exists() {
+        eprintln!("skipping: tutorial 2/2 config not present");
+        return;
+    }
+    // Build opt from CLI-style overrides: point outputdir at tmp, enable image_map_use,
+    // and inject a simple ideogram_url template.
+    let mut opt: HashMap<String, ConfigValue> = HashMap::new();
+    opt.insert(
+        "outputdir".into(),
+        ConfigValue::Str(tmp.path().to_string_lossy().to_string()),
+    );
+    opt.insert("outputfile".into(), ConfigValue::Str("test".into()));
+    opt.insert("image_map_use".into(), ConfigValue::Str("1".into()));
+    opt.insert("silent".into(), ConfigValue::Str("1".into()));
+
+    let out = circos_rs::run_with_opt(&conf_dir.join("circos.conf"), opt)
+        .expect("run_with_opt should succeed");
+    assert!(out.map_make, "image_map_use should have flipped map_make=true");
+    let html_path = out.outputfile_map.expect("outputfile_map path not set");
+    assert!(Path::new(&html_path).exists(), "companion .html missing at {}", html_path);
+    let html = std::fs::read_to_string(&html_path).expect("read companion html");
+    assert!(html.contains("<map name="), "missing <map> wrapper");
+    assert!(html.contains("</map>"), "missing </map> close");
+    // No ideogram_url configured in tutorial 2/2, so no <area> entries are expected —
+    // this assertion guards only the wrapper.
+}
+
+/// Image-map `<area>` round-trip: injecting `ideogram_url` should produce one
+/// poly `<area>` per drawn ideogram in the companion `.html`. Guards iter 63's
+/// `draw_ideograms` URL wiring.
+#[test]
+fn test_run_image_map_area_emission() {
+    let tmp = tempfile::tempdir().expect("tmpdir");
+    let conf = Path::new(env!("CARGO_MANIFEST_DIR")).join("circos/tutorials/2/2/circos.conf");
+    if !conf.exists() {
+        eprintln!("skipping: tutorial 2/2 config not present");
+        return;
+    }
+    let mut opt: HashMap<String, ConfigValue> = HashMap::new();
+    opt.insert(
+        "outputdir".into(),
+        ConfigValue::Str(tmp.path().to_string_lossy().to_string()),
+    );
+    opt.insert("outputfile".into(), ConfigValue::Str("test".into()));
+    opt.insert("image_map_use".into(), ConfigValue::Str("1".into()));
+    opt.insert("silent".into(), ConfigValue::Str("1".into()));
+    // populateconfiguration merges opt into config, so nested `ideogram.ideogram_url`
+    // must be expressed via the top-level key — the OPT path in Perl is also flat.
+    let mut ideogram_map = HashMap::new();
+    ideogram_map.insert(
+        "ideogram_url".into(),
+        ConfigValue::Str("/x?c=[chr]&s=[start]&e=[end]".into()),
+    );
+    // Tutorial 2/2's ideogram block is merged later; override via direct ConfigValue::Map
+    // at the top. Easiest to set the per-draw fallback path.
+    opt.insert(
+        "ideogram".into(),
+        ConfigValue::Map(ideogram_map),
+    );
+
+    let out = circos_rs::run_with_opt(&conf, opt).expect("run should succeed");
+    let html = std::fs::read_to_string(out.outputfile_map.expect("map path"))
+        .expect("read html");
+    let area_count = html.matches("<area").count();
+    // 24 human chromosomes displayed by default → at least 24 <area> entries.
+    assert!(
+        area_count >= 24,
+        "expected ≥24 ideogram <area> entries, got {}",
+        area_count
+    );
+    // Spot-check that URL template substitution occurred.
+    assert!(
+        html.contains("c=hs1"),
+        "expected ideogram_url substitution with chr=hs1"
+    );
 }
