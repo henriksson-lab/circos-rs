@@ -139,6 +139,14 @@ Speed comparison against the original Perl Circos v0.53 (PNG output, release bui
 | 5/5 (3 chr, 1989 links) | 13.71s | 1.71s | 1.26s | 8.0x | 10.9x |
 | 6/6 (1 chr, text labels) | 0.74s | 0.14s | 0.14s | 5.3x | 5.3x |
 
+RSS comparison for the same cases (`/usr/bin/time -v`, maximum resident set size). The RSS ratio is Perl RSS divided by Rust RSS, so larger values mean Rust used less memory.
+
+| Tutorial | Perl RSS | Rust 1T RSS | Rust MT RSS | 1T RSS ratio | MT RSS ratio |
+|----------|---------:|------------:|------------:|-------------:|-------------:|
+| 2/2 (24 chr, bands, ticks) | 100,480 KB | 81,468 KB | 81,468 KB | 1.23x | 1.23x |
+| 5/5 (3 chr, 1989 links) | 149,760 KB | 114,692 KB | 122,056 KB | 1.31x | 1.23x |
+| 6/6 (1 chr, text labels) | 60,800 KB | 78,720 KB | 78,720 KB | 0.77x | 0.77x |
+
 Multithreading (via rayon) parallelizes link SVG generation. The benefit is largest for link-heavy plots. PNG rasterization (resvg/tiny-skia) is single-threaded and dominates for simpler plots.
 
 ## Supported Configuration
